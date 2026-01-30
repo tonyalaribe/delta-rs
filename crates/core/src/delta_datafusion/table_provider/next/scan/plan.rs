@@ -284,6 +284,14 @@ impl DeltaScanConfig {
                 .with_data_type(DataType::BinaryView)
                 .into(),
             DataType::Struct(fields) => {
+                // Skip view type conversion for Variant structs (metadata+value Binary fields)
+                // to preserve compatibility with delta-kernel's Variant type definition
+                let is_variant = fields.len() == 2
+                    && fields.iter().any(|f| f.name() == "metadata" && matches!(f.data_type(), DataType::Binary | DataType::BinaryView))
+                    && fields.iter().any(|f| f.name() == "value" && matches!(f.data_type(), DataType::Binary | DataType::BinaryView));
+                if is_variant {
+                    return field;
+                }
                 let new_fields = fields
                     .iter()
                     .map(|f| self.map_field(f.clone(), partition_cols))

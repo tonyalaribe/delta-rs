@@ -237,6 +237,8 @@ pub static INSTANCE: LazyLock<ProtocolChecker> = LazyLock::new(|| {
     let mut reader_features = HashSet::new();
     reader_features.insert(TableFeature::TimestampWithoutTimezone);
     reader_features.insert(TableFeature::DeletionVectors);
+    reader_features.insert(TableFeature::V2Checkpoint);
+    reader_features.insert(TableFeature::VariantType);
     // reader_features.insert(TableFeature::ColumnMapping);
 
     let mut writer_features = HashSet::new();
@@ -250,6 +252,8 @@ pub static INSTANCE: LazyLock<ProtocolChecker> = LazyLock::new(|| {
         writer_features.insert(TableFeature::GeneratedColumns);
     }
     writer_features.insert(TableFeature::DeletionVectors);
+    writer_features.insert(TableFeature::V2Checkpoint);
+    writer_features.insert(TableFeature::VariantType);
     // writer_features.insert(TableFeature::ColumnMapping);
     // writer_features.insert(TableFeature::IdentityColumns);
 

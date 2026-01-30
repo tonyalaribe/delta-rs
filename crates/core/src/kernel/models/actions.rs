@@ -159,6 +159,19 @@ pub fn contains_timestampntz<'a>(mut fields: impl Iterator<Item = &'a StructFiel
     fields.any(|f| _check_type(f.data_type()))
 }
 
+/// checks if table contains variant type in any field including nested fields.
+pub fn contains_variant<'a>(mut fields: impl Iterator<Item = &'a StructField>) -> bool {
+    fn _check_type(dtype: &DataType) -> bool {
+        match dtype {
+            DataType::Variant(_) => true,
+            DataType::Array(inner) => _check_type(inner.element_type()),
+            DataType::Struct(inner) => inner.fields().any(|f| _check_type(f.data_type())),
+            _ => false,
+        }
+    }
+    fields.any(|f| _check_type(f.data_type()))
+}
+
 /// Extension trait for delta-kernel Protocol action.
 ///
 /// Allows us to extend the Protocol struct with additional methods
@@ -347,7 +360,6 @@ impl ProtocolInner {
             // TODO: move this is in future to use delta_kernel::table_properties
             let mut converted_writer_features = configuration
                 .iter()
-                .filter(|(_, value)| value.to_ascii_lowercase().parse::<bool>().is_ok_and(|v| v))
                 .filter_map(|(key, value)| match key.as_str() {
                     "delta.enableChangeDataFeed" if parse_bool(value) => {
                         Some(TableFeature::ChangeDataFeed)
@@ -407,9 +419,14 @@ impl ProtocolInner {
         let generated_cols = schema.get_generated_columns()?;
         let invariants = schema.get_invariants()?;
         let contains_timestamp_ntz = self.contains_timestampntz(schema.fields());
+        let contains_variant = self.contains_variant(schema.fields());
 
         if contains_timestamp_ntz {
             self = self.enable_timestamp_ntz()
+        }
+
+        if contains_variant {
+            self = self.enable_variant_type()
         }
 
         if !generated_cols.is_empty() {
@@ -581,6 +598,18 @@ impl ProtocolInner {
         if self.min_writer_version >= 7 {
             self = self.append_writer_features([TableFeature::Invariants]);
         }
+        self
+    }
+
+    /// checks if table contains variant type in any field including nested fields.
+    fn contains_variant<'a>(&self, fields: impl Iterator<Item = &'a StructField>) -> bool {
+        contains_variant(fields)
+    }
+
+    /// Enable variant type in the protocol
+    fn enable_variant_type(mut self) -> Self {
+        self = self.append_reader_features([TableFeature::VariantType]);
+        self = self.append_writer_features([TableFeature::VariantType]);
         self
     }
 }
@@ -1242,4 +1271,26 @@ mod tests {
     //     let found = tree_map.iter().collect::<Vec<_>>();
     //     assert_eq!(found, expected)
     // }
+}
+
+#[cfg(test)]
+mod variant_tests {
+    use super::*;
+    use delta_kernel::schema::{StructField, StructType};
+
+    #[test]
+    fn test_contains_variant() {
+        let without = StructType::new_unchecked([StructField::new("id", DataType::INTEGER, false)]);
+        let with = StructType::new_unchecked([StructField::new("v", DataType::unshredded_variant(), true)]);
+        assert!(!contains_variant(without.fields()));
+        assert!(contains_variant(with.fields()));
+    }
+
+    #[test]
+    fn test_apply_column_metadata_enables_variant() {
+        let schema = StructType::new_unchecked([StructField::new("v", DataType::unshredded_variant(), true)]);
+        let result = ProtocolInner::default().apply_column_metadata_to_protocol(&schema).unwrap();
+        assert!(result.reader_features.as_ref().unwrap().contains(&TableFeature::VariantType));
+        assert!(result.writer_features.as_ref().unwrap().contains(&TableFeature::VariantType));
+    }
 }
